@@ -444,8 +444,11 @@ const chat: Handler = ({ path, method, body, seg }) => {
 			rooms: demoRooms,
 			roomId: demoRooms[0]?.id ?? null
 		});
-	if (path === '/chat/mentions') return ok({ count: 0, items: [] });
-	if (path === '/chat/push/key') return ok({ publicKey: null });
+	// ChatMention[], not a count envelope — the panel filters this list, and an
+	// object here threw while the sheet was rendering, which read as the
+	// conversations button doing nothing at all.
+	if (path === '/chat/mentions') return ok([]);
+	if (path === '/chat/push/key') return ok({ enabled: false, publicKey: '' });
 	if (path.startsWith('/chat/push/subscribe')) return ok(null);
 
 	// GET /chat/order/:submissionId — the thread id, created on first open.
@@ -488,6 +491,22 @@ const chat: Handler = ({ path, method, body, seg }) => {
 				lastReadAt: null
 			}))
 		});
+	}
+
+	// A DM is created on first open, same as an order thread.
+	if (seg[1] === 'dm') {
+		const id = `c-dm-${seg[2]}`;
+		if (!conversations.some((c) => c.id === id)) {
+			conversations.push({
+				id,
+				kind: 'DM',
+				lastMessageAt: null,
+				mutedUntil: null,
+				order: null,
+				members: [demoOperators[0], ...demoOperators.filter((u) => u.id === seg[2])]
+			} as never);
+		}
+		return ok({ conversationId: id });
 	}
 
 	if (seg[1] === 'conversations') return ok(null); // read / lock / prune / passcode
