@@ -26,6 +26,7 @@ import {
 	demoOrders,
 	demoRegions,
 	demoReminders,
+	demoRooms,
 	demoUser
 } from './fixtures';
 
@@ -33,6 +34,7 @@ import {
 const orders: Order[] = structuredClone(demoOrders);
 const reminders = structuredClone(demoReminders);
 const messages = structuredClone(demoMessages);
+const conversations = structuredClone(demoConversations);
 
 const ok = (data: unknown, extra: Record<string, unknown> = {}) =>
 	json({ success: true, data, ...extra });
@@ -97,14 +99,43 @@ const reference: Handler = ({ path, seg }) => {
 /* ── orders: list, detail, lifecycle ──────────────────────────────────────── */
 
 const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
-	// GET /admin/shipments — the list, with the filters the board actually uses.
+	// GET /admin/shipments — the list.
+	//
+	// Every filter the board sends is honoured, because the counts it derives
+	// from them are visible: ignoring one does not degrade quietly, it puts the
+	// full set behind a label that promises a subset — eight orders under
+	// "failed delivery" when none failed.
 	if (path === '/admin/shipments' && method === 'GET') {
 		let rows = [...orders];
+
 		const status = params.get('status');
 		if (status) {
 			const wanted = status.split(',').map((s) => s.trim());
 			rows = rows.filter((o) => wanted.includes(o.status));
 		}
+
+		// The carrier's own reading, which lives on the shipment, not the order.
+		const carrierClass = params.get('carrierClass');
+		if (carrierClass) {
+			const wanted = carrierClass.split(',').map((s) => s.trim());
+			rows = rows.filter((o) => !!o.shipment?.carrierClass && wanted.includes(o.shipment.carrierClass));
+		}
+
+		if (params.get('returns') === '1') rows = rows.filter((o) => !!o.returnOrder);
+
+		// Channel: a reseller's storefront versus our own. Both directions are
+		// used — the dropship tab includes, the store tab excludes.
+		const storeName = params.get('storeName');
+		if (storeName) {
+			const wanted = storeName.split(',').map((s) => s.trim().toLowerCase());
+			rows = rows.filter((o) => wanted.includes((o.storeName ?? '').toLowerCase()));
+		}
+		const excludeStoreName = params.get('excludeStoreName');
+		if (excludeStoreName) {
+			const unwanted = excludeStoreName.split(',').map((s) => s.trim().toLowerCase());
+			rows = rows.filter((o) => !unwanted.includes((o.storeName ?? '').toLowerCase()));
+		}
+
 		const q = params.get('search')?.trim() || params.get('q')?.trim();
 		if (q)
 			rows = rows.filter((o) =>
@@ -112,7 +143,13 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 					.filter(Boolean)
 					.some((v) => String(v).toLowerCase().includes(q.toLowerCase()))
 			);
-		rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+		const sortKey = params.get('sortBy') === 'updatedAt' ? 'updatedAt' : 'createdAt';
+		rows.sort((a, b) => {
+			const av = (a[sortKey] as string) ?? a.createdAt;
+			const bv = (b[sortKey] as string) ?? b.createdAt;
+			return av < bv ? 1 : -1;
+		});
 
 		const page = Number(params.get('page') || 1);
 		const limit = Number(params.get('limit') || 20);
@@ -273,17 +310,58 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 
 /* ── chat ─────────────────────────────────────────────────────────────────── */
 
+/**
+ * Chat. Every order gets its own thread, created on first open exactly as the
+ * real API does, so the line an operator sees on an order card and the thread
+ * behind it are the same conversation rather than two unrelated fixtures.
+ *
+ * The envelopes matter here: `chatOrderThread` answers with a bare
+ * `{ conversationId }`, and a page of messages carries its own conversation and
+ * read state alongside them. Returning a plain array instead renders as a
+ * thread with nothing in it.
+ */
+function orderConversationId(submissionId: string): string {
+	const order = findOrder(submissionId);
+	const key = order?.id ?? submissionId;
+	const id = `c-order-${key}`;
+	if (!conversations.some((c) => c.id === id)) {
+		conversations.push({
+			id,
+			kind: 'ORDER',
+			lastMessageAt: null,
+			mutedUntil: null,
+			order: order
+				? {
+						id: order.id,
+						submissionId: order.submissionId,
+						idempotencyKey: order.idempotencyKey,
+						customerName: order.customerName,
+						cityName: order.cityName,
+						price: order.price
+					}
+				: null,
+			members: demoOperators.slice(0, 3)
+		} as never);
+	}
+	return id;
+}
+
 const chat: Handler = ({ path, method, body, seg }) => {
 	if (!path.startsWith('/chat')) return undefined;
 	if (path === '/chat/users') return ok(demoOperators);
-	if (path === '/chat/conversations') return ok(demoConversations);
-	if (path === '/chat/mentions') return ok({ count: 1, items: [] });
+	if (path === '/chat/conversations')
+		return ok({
+			conversations: conversations.filter((c) => c.kind !== 'ROOM'),
+			rooms: demoRooms,
+			roomId: demoRooms[0]?.id ?? null
+		});
+	if (path === '/chat/mentions') return ok({ count: 0, items: [] });
 	if (path === '/chat/push/key') return ok({ publicKey: null });
 	if (path.startsWith('/chat/push/subscribe')) return ok(null);
 
+	// GET /chat/order/:submissionId — the thread id, created on first open.
 	if (path.startsWith('/chat/order/')) {
-		const conv = demoConversations[0];
-		return ok({ conversation: conv, messages: messages[conv.id] ?? [] });
+		return ok({ conversationId: orderConversationId(decodeURIComponent(seg[2])) });
 	}
 
 	if (seg[1] === 'conversations' && seg[3] === 'messages') {
@@ -296,12 +374,31 @@ const chat: Handler = ({ path, method, body, seg }) => {
 				body: String(body.body ?? ''),
 				createdAt: new Date().toISOString(),
 				author: demoOperators[0],
-				mentions: []
+				mentions: ((body.mentions as string[]) ?? []).map((userId) => ({ userId }))
 			};
 			(messages[id] ??= []).push(msg as never);
+			const conv = conversations.find((c) => c.id === id);
+			if (conv) conv.lastMessageAt = msg.createdAt;
 			return ok(msg);
 		}
-		return ok(messages[id] ?? []);
+		const conv = conversations.find((c) => c.id === id);
+		return ok({
+			messages: messages[id] ?? [],
+			hasMore: false,
+			lastReadAt: null,
+			conversation: {
+				id,
+				kind: conv?.kind ?? 'ORDER',
+				name: null,
+				messageTtlMinutes: null,
+				pruneByAnyMember: false
+			},
+			readers: demoOperators.slice(0, 3).map((u) => ({
+				userId: u.id,
+				name: u.name,
+				lastReadAt: null
+			}))
+		});
 	}
 
 	if (seg[1] === 'conversations') return ok(null); // read / lock / prune / passcode
@@ -311,10 +408,22 @@ const chat: Handler = ({ path, method, body, seg }) => {
 
 /* ── reminders ────────────────────────────────────────────────────────────── */
 
-const reminderRoutes: Handler = ({ path, method, body, seg }) => {
+const reminderRoutes: Handler = ({ path, params, method, body, seg }) => {
 	if (!path.startsWith('/reminders')) return undefined;
 	if (path === '/reminders/assignable-users') return ok(demoOperators);
-	if (path === '/reminders' && method === 'GET') return ok(reminders);
+	if (path === '/reminders' && method === 'GET') {
+		// The order detail asks by submissionId and the header chip by status.
+		// Ignoring either puts the same reminder on every order.
+		let rows = reminders;
+		const submissionId = params.get('submissionId');
+		if (submissionId) rows = rows.filter((r) => r.submissionId === submissionId);
+		const status = params.get('status');
+		if (status) {
+			const wanted = status.split(',').map((x) => x.trim());
+			rows = rows.filter((r) => wanted.includes(r.status));
+		}
+		return ok(rows);
+	}
 	if (path === '/reminders' && method === 'POST') {
 		const r = {
 			...structuredClone(demoReminders[0]),

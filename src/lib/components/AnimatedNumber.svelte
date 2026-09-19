@@ -414,9 +414,28 @@
 		display: block;
 		height: var(--reel-cell);
 		overflow: hidden;
-		/* Soft-fade the window edges instead of hard-cropping. */
-		-webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%);
-		mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 78%, transparent 100%);
+		/* Soft-fade the window edges instead of hard-cropping.
+		   The solid band has to clear the tallest digit the current face draws,
+		   or a resting number loses its top to the gradient. Digit ink runs to
+		   roughly 18%-83% of the cell in the faces used here, so the fade starts
+		   outside that with a little margin; it is only ever seen while a strip
+		   is actually moving. --reel-fade lets a face with taller figures widen
+		   it without touching this file. */
+		--reel-fade: 14%;
+		-webkit-mask-image: linear-gradient(
+			to bottom,
+			transparent 0%,
+			#000 var(--reel-fade),
+			#000 calc(100% - var(--reel-fade)),
+			transparent 100%
+		);
+		mask-image: linear-gradient(
+			to bottom,
+			transparent 0%,
+			#000 var(--reel-fade),
+			#000 calc(100% - var(--reel-fade)),
+			transparent 100%
+		);
 	}
 	.t-reel-strip {
 		display: flex;

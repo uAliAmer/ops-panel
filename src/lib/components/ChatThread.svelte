@@ -46,7 +46,9 @@
 	let {
 		conversationId,
 		heightClass = 'max-h-[22rem]',
-		placeholder = 'اكتب رسالة… استخدم @ للإشارة إلى زميل',
+		// Kept short on purpose: a textarea placeholder wraps, and this box is one
+		// row tall, so a longer string loses its second line to the crop.
+		placeholder = 'اكتب رسالة… @ لإشارة زميل',
 		emptyText = 'لا توجد رسائل بعد.',
 		autofocus = false,
 		onNavigate
@@ -1062,7 +1064,7 @@
 				onfocus={scrollToEnd}
 				rows="1"
 				{placeholder}
-				class="border-border/60 bg-background/60 min-h-10 flex-1 resize-none rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
+				class="border-border/60 bg-background/60 placeholder:truncate min-h-10 flex-1 resize-none rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30"
 			></textarea>
 			<Button
 				size="icon"

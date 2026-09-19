@@ -77,23 +77,8 @@ docker build -t ops-panel-demo --build-arg BASE_PATH= --build-arg VITE_DEMO=1 .
 docker run -p 8080:80 ops-panel-demo
 ```
 
-### Deploying the demo to Cloudflare Pages
-
-The build is static, so Pages serves it with no adapter change and no worker.
-
-| Setting | Value |
-| --- | --- |
-| Build command | `npm run build:pages` |
-| Output directory | `build` |
-| Node version | from `.node-version` (22) |
-
-`build:pages` is `build:demo` with `BASE_PATH=` — the panel defaults to being
-mounted at `/admin`, and on Pages it owns the root.
-
-Client-side routes such as `/order/<id>` work without a `_redirects` file: the
-build emits no top-level `404.html`, which is how Pages recognises a
-single-page app and serves `/` for unmatched paths. If you ever add a
-`404.html`, that stops being true and you need the fallback rule instead.
+`npm run build:pages` is the same demo build with `BASE_PATH=` cleared, for
+hosting it at a domain root.
 
 ## Configuration
 

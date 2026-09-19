@@ -12,6 +12,7 @@
 import type {
 	ChatConversation,
 	ChatMessage,
+	ChatRoom,
 	ChatUser,
 	LocalDriver,
 	Order,
@@ -95,7 +96,7 @@ export const demoDrivers: LocalDriver[] = [
 	}
 ];
 
-/** Image filenames are synthetic; demo `resolveImage` renders them as SVG. */
+/** Image filenames are synthetic; the seed is what picks each demo picture. */
 const img = (seed: string) => `/api/static/images/${seed}.webp`;
 
 /**
@@ -173,6 +174,9 @@ export const demoOrders: Order[] = [
 		submissionId: 'a1b2c3d4-0000-4000-8000-000000000003',
 		idempotencyKey: 'ORD-2026-000343',
 		source: 'API',
+		// The channel is what makes this a dropship order to the panel — the
+		// reseller fields alone do not classify it (see utils/source.ts).
+		storeName: 'Dropship',
 		customerName: 'مريم حسن',
 		customerPhone: '07512223333',
 		cityId: 3,
@@ -318,7 +322,7 @@ export const demoOrders: Order[] = [
 		itemsNumber: 1,
 		status: 'REJECTED',
 		rejectedAt: ago(14),
-		notes: 'رقم الهاتف غير صحيح',
+		notes: 'توصيل بعد الساعة 4 العصر',
 		createdAt: ago(16),
 		items: [{ sku: '66-3', name: 'شامبو', quantity: 1, unitPrice: 23000, imageUrl: img('shampoo') }]
 	},
@@ -381,7 +385,9 @@ export const demoReminders: Reminder[] = [
 
 export const demoConversations: ChatConversation[] = [
 	{
-		id: 'c-1',
+		// Must match orderConversationId() in ./index — the card's chat line and
+		// this thread are the same conversation.
+		id: 'c-order-o-1',
 		kind: 'ORDER',
 		lastMessageAt: ago(1),
 		mutedUntil: null,
@@ -405,11 +411,28 @@ export const demoConversations: ChatConversation[] = [
 	} as ChatConversation
 ];
 
+/** The team room. The conversations drawer opens onto this by default. */
+export const demoRooms: ChatRoom[] = [
+	{
+		id: 'c-2',
+		name: 'غرفة الفريق',
+		description: 'كل ما يخص الشغل اليومي',
+		messageTtlMinutes: null,
+		pruneByAnyMember: false,
+		restricted: false,
+		hasPasscode: false,
+		locked: false,
+		isOwner: true,
+		lastMessageAt: ago(5),
+		unread: 0
+	}
+];
+
 export const demoMessages: Record<string, ChatMessage[]> = {
-	'c-1': [
+	'c-order-o-1': [
 		{
 			id: 'm-1',
-			conversationId: 'c-1',
+			conversationId: 'c-order-o-1',
 			authorId: 'u-2',
 			body: 'الزبون طلب التوصيل بعد الساعة 4',
 			createdAt: ago(1),

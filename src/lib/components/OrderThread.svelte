@@ -58,7 +58,7 @@
 	<ChatThread
 		{conversationId}
 		{heightClass}
-		placeholder="اكتب ملاحظة… استخدم @ للإشارة إلى زميل"
+		placeholder="اكتب ملاحظة… @ لإشارة زميل"
 		emptyText="لا توجد رسائل بعد — اكتب ملاحظة عن هذا الطلب ليراها بقية الفريق."
 	/>
 </div>

@@ -24,11 +24,25 @@ DST="$(cd "$(dirname "$0")" && pwd)"
 # open-licensed font stack, and that file is where it is declared. Let a sync
 # overwrite it and the next build pulls in font binaries that must not be
 # published here.
-KEEP="README.md Dockerfile nginx.conf sync-from-upstream.sh LICENSE src/app-fonts.css"
+KEEP="README.md Dockerfile nginx.conf sync-from-upstream.sh LICENSE src/app-fonts.css .gitignore"
+
+# Fonts are an allowlist, not a blocklist: only the open-licensed files this
+# repository ships may come across, and anything else under src/lib/fonts/ is
+# skipped whatever it is called. The .gitignore rules are a second line of
+# defence; this is the first, because a sync that overwrote .gitignore would
+# disarm them in the same pass.
+FONT_DIR="src/lib/fonts/"
+FONT_ALLOW="SNPro-"
 
 cd "$SRC"
 git ls-files . | while read -r f; do
   for k in $KEEP; do [ "$f" = "$k" ] && continue 2; done
+  case "$f" in
+    "$FONT_DIR"*)
+      base=${f#"$FONT_DIR"}
+      case "$base" in "$FONT_ALLOW"*) ;; *) continue;; esac
+      ;;
+  esac
   mkdir -p "$DST/$(dirname "$f")"
   cp "$SRC/$f" "$DST/$f"
 done
