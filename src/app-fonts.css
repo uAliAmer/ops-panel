@@ -1,0 +1,29 @@
+/* The UI typefaces.
+
+   Every typeface decision lives in this one file — the @font-face blocks and
+   both font variables — so changing the family is a single-file edit and
+   nothing else in the stylesheet needs to know. Both faces are open licensed:
+
+     Tajawal   SIL OFL 1.1, loaded from Google Fonts (see src/app.html)
+     SN Pro    SIL OFL 1.1, self-hosted below, by Tobias Whetton / Supernotes
+
+   Paths are relative to this file so Vite fingerprints them and rewrites the
+   URLs per build base — an absolute /fonts URL would 404 under a build mounted
+   at a subpath. */
+
+@font-face {
+	font-family: 'SN Pro';
+	src: url('./lib/fonts/SNPro-Variable.ttf') format('truetype');
+	font-weight: 300 700;
+	font-style: normal;
+	font-display: swap;
+}
+
+@theme inline {
+	/* Tajawal is the UI face (Arabic + Latin); SN Pro is the Latin fallback
+	   while it loads or if it fails. */
+	--font-sans: 'Tajawal', 'SN Pro', ui-sans-serif, system-ui, sans-serif;
+	/* Latin display only — DROPSHIPPING in the order header. Never for Arabic:
+	   Archivo Black has no Arabic coverage and would silently fall through. */
+	--font-display: 'Archivo Black', 'Arial Black', ui-sans-serif, sans-serif;
+}
