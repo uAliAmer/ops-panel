@@ -47,13 +47,51 @@ const json = (body: unknown, status = 200) =>
 
 const fail = (error: string, status = 400) => json({ success: false, error }, status);
 
+/**
+ * Resolve an order by any of the identifiers the panel routes on.
+ *
+ * The URL carries the slug, not the key: orderSlug() drops the `ORD-` prefix,
+ * so `/order/2026-000344` has to find `ORD-2026-000344`, and an older order is
+ * addressed by the first eight characters of its submissionId. Matching only
+ * the full key works while the row is already in memory and fails the moment
+ * someone opens or reloads the link directly.
+ */
 const findOrder = (id: string) =>
-	orders.find((o) => o.id === id || o.submissionId === id || o.idempotencyKey === id);
+	orders.find(
+		(o) =>
+			o.id === id ||
+			o.submissionId === id ||
+			o.idempotencyKey === id ||
+			o.idempotencyKey === `ORD-${id}` ||
+			(o.submissionId ?? o.id).slice(0, 8) === id
+	);
 
 const touch = (o: Order) => {
 	o.updatedAt = new Date().toISOString();
 	return o;
 };
+
+/**
+ * Append to an order's audit trail. Demo actions write here for the same reason
+ * the real ones do: an operator checks the trail to see what happened, and a
+ * status that moved without leaving a line behind is the thing the trail exists
+ * to rule out.
+ */
+let demoHistSeq = 1000;
+function logHistory(
+	order: Order,
+	action: string,
+	extra: { note?: string | null; changes?: Record<string, unknown> | null } = {}
+) {
+	(order.history ??= []).push({
+		id: `h-${++demoHistSeq}`,
+		action,
+		createdAt: new Date().toISOString(),
+		changedBy: { id: demoUser.id, name: demoUser.name },
+		note: extra.note ?? null,
+		changes: extra.changes ?? null
+	} as never);
+}
 
 /** Network is not instant, and a demo that answers in 0ms hides every spinner. */
 const latency = () => new Promise((r) => setTimeout(r, 120 + Math.random() * 180));
@@ -193,34 +231,75 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 	if (!path.startsWith('/admin/shipments/')) return undefined;
 
 	// Literal sub-routes come before /:id, exactly as the real API mounts them.
-	if (path === '/admin/shipments/pickup-counts')
+	// What is still on our shelf when a driver walks in. The board reduces over
+	// branches reading `alwaseet.toPack`, so the nested shape is not optional —
+	// a flat object here is what put "undefined is not an object" on the page.
+	if (path === '/admin/shipments/pickup-counts') {
+		const onShelf = orders.filter((o) => o.status === 'APPROVED' || o.status === 'PACKED');
+		const awaiting = orders.filter(
+			(o) =>
+				o.status === 'SENT_TO_CARRIER' &&
+				o.shipment?.carrierMethod !== 'LOCAL' &&
+				!o.shipment?.pickedUpAt
+		);
+		const localOrders = orders.filter(
+			(o) => o.shipment?.carrierMethod === 'LOCAL' && o.status === 'SENT_TO_CARRIER'
+		);
+		const localDrivers = demoDrivers.map((d) => ({
+			id: d.id,
+			name: d.name,
+			phone: d.phone ?? null,
+			count: localOrders.filter((o) => o.shipment?.localDriverId === d.id).length
+		}));
+		const preview = (rows: Order[]) =>
+			rows.slice(0, 5).map((o) => ({
+				slug: o.idempotencyKey ?? o.id,
+				label: o.idempotencyKey ?? `#${o.id.slice(0, 8)}`,
+				customerName: o.customerName,
+				cityName: o.cityName,
+				price: o.price
+			}));
+
+		const alwaseet = { toPack: onShelf.length, awaitingPickup: awaiting.length };
+		const local = { total: localOrders.length, drivers: localDrivers };
+
 		return ok({
+			myBranch: 'main',
 			branches: [
 				{
-					key: '612',
-					name: 'بابلون',
-					count: 2,
-					drivers: [{ id: 'd-1', name: 'حيدر', phone: '07700000001', count: 2 }],
-					orders: orders.slice(0, 2).map((o) => ({
-						slug: o.idempotencyKey ?? o.id,
-						label: o.idempotencyKey ?? `#${o.id}`,
-						customerName: o.customerName,
-						cityName: o.cityName,
-						price: o.price
-					}))
+					key: 'main',
+					label: 'الفرع الرئيسي',
+					alwaseet,
+					local,
+					orders: preview([...onShelf, ...awaiting]),
+					ordersTotal: onShelf.length + awaiting.length
 				}
 			],
-			total: 2
+			alwaseet,
+			local
 		});
+	}
 
+	// The wallet snapshot is per carrier app account, not per operator.
 	if (path === '/admin/shipments/wallets')
 		return ok([
-			{ operator: 'حساب تجريبي', email: 'demo@example.com', balance: 250000, orders: 4 },
-			{ operator: 'سارة', email: 'sara@example.com', balance: 80000, orders: 2 }
+			{
+				key: 'main',
+				label: 'الفرع الرئيسي',
+				ok: true,
+				merchantName: 'حساب تجريبي',
+				safe: 1250000,
+				openGross: 185000
+			}
 		]);
 
+	if (path === '/admin/shipments/settlement/invoices')
+		return ok({
+			invoices: [],
+			totals: { count: 0, merchantPrice: 0, pendingCount: 0, pendingAmount: 0 }
+		});
+
 	if (path === '/admin/shipments/local-drivers' && method === 'GET') return ok(demoDrivers);
-	if (path === '/admin/shipments/settlement/invoices') return ok({ batches: [], invoices: [] });
 	if (path === '/admin/shipments/sticker/validate')
 		return ok({ valid: true, labelId: String(body.labelId ?? '4470999'), status: 'AVAILABLE' });
 	if (path.startsWith('/admin/shipments/search-products')) return ok([]);
@@ -242,7 +321,13 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 	if (!action) {
 		if (method === 'GET') return ok(order);
 		if (method === 'PATCH') {
+			const changes: Record<string, unknown> = {};
+			for (const [k, v] of Object.entries(body)) {
+				const before = (order as Record<string, unknown>)[k];
+				if (before !== v) changes[k] = [before ?? null, v ?? null];
+			}
 			Object.assign(order, body);
+			if (Object.keys(changes).length) logHistory(order, 'SAVED', { changes });
 			return ok(touch(order));
 		}
 		if (method === 'DELETE') {
@@ -255,20 +340,23 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 		case 'approve':
 			order.status = 'APPROVED';
 			order.approvedAt = new Date().toISOString();
+			logHistory(order, 'APPROVED');
 			return ok(touch(order));
 		case 'reject':
 			order.status = 'REJECTED';
 			order.rejectedAt = new Date().toISOString();
-			if (body.reason) order.notes = String(body.reason);
+			logHistory(order, 'REJECTED', { note: body.reason ? String(body.reason) : null });
 			return ok(touch(order));
 		case 'pack':
 			order.status = 'PACKED';
 			order.packedAt = new Date().toISOString();
+			logHistory(order, 'PACKED');
 			return ok(touch(order));
 		case 'cancel':
 			order.status = 'CANCELLED';
 			return ok(touch(order), { carrier: null, invoice: null });
 		case 'status':
+			logHistory(order, 'SAVED', { changes: { status: [order.status, String(body.status ?? order.status)] } });
 			order.status = String(body.status ?? order.status);
 			return ok(touch(order));
 		case 'customer-history':
@@ -299,6 +387,7 @@ const orderRoutes: Handler = ({ path, params, method, body, seg }) => {
 			return ok({ sent: true });
 		case 'erp-retry':
 			order.erpInvoiceStatus = 'SETTLED';
+			logHistory(order, 'RETRIED', { note: 'إعادة إصدار قيد المحاسبة' });
 			return ok({ status: 'SETTLED' });
 		case 'reprint':
 			return ok({ message: 'أُرسل الطلب إلى الطابعة (تجريبي)' });

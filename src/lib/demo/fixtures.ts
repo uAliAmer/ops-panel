@@ -16,6 +16,7 @@ import type {
 	ChatUser,
 	LocalDriver,
 	Order,
+	OrderHistory,
 	Reminder,
 	User
 } from '../api';
@@ -132,9 +133,6 @@ export const demoOrders: Order[] = [
 		items: [
 			{ sku: '5-33', name: 'سيروم فيتامين سي', quantity: 2, unitPrice: 25000, imageUrl: img('serum') },
 			{ sku: '12-4', name: 'كريم مرطب للوجه', quantity: 1, unitPrice: 30000, imageUrl: img('cream') }
-		],
-		history: [
-			{ id: 'h-1', action: 'CREATED', createdAt: ago(3), actor: null } as never
 		],
 		chat: {
 			body: 'الزبون طلب التوصيل بعد الساعة 4',
@@ -357,6 +355,81 @@ export const demoOrders: Order[] = [
 		}
 	}
 ];
+
+/**
+ * The audit trail, attached after the fact so each order above stays readable.
+ *
+ * Every entry is consistent with the order it belongs to: the timestamps fall
+ * between that order's own createdAt and its last transition, and no order
+ * carries a step its status has not reached. A trail that disagrees with the
+ * status beside it is worse than none — an operator reads this to work out what
+ * actually happened.
+ */
+let histSeq = 0;
+function hist(
+	action: OrderHistory['action'],
+	hoursAgo: number,
+	by: { id: string; name: string } | null,
+	extra: Partial<OrderHistory> = {}
+): OrderHistory {
+	return {
+		id: `h-${++histSeq}`,
+		action,
+		createdAt: ago(hoursAgo),
+		changedBy: by,
+		note: null,
+		changes: null,
+		...extra
+	};
+}
+
+const op = (i: number) => ({ id: demoOperators[i].id, name: demoOperators[i].name });
+const me = op(0);
+
+const demoHistory: Record<string, OrderHistory[]> = {
+	'o-1': [hist('CREATED', 3, null, { note: 'ورد من المتجر الإلكتروني' })],
+	'o-2': [
+		hist('CREATED', 8, me),
+		hist('SAVED', 6, op(1), { changes: { price: [40000, 45000], notes: [null, 'زبون دائم'] } }),
+		hist('APPROVED', 2, me)
+	],
+	'o-3': [
+		hist('CREATED', 10, null, { note: 'ورد عبر الـ API من متجر النور' }),
+		hist('APPROVED', 5, op(2)),
+		hist('PACKED', 1, op(1))
+	],
+	'o-4': [
+		hist('CREATED', 30, me),
+		hist('APPROVED', 26, me),
+		hist('PACKED', 22, op(1)),
+		hist('SENT', 20, op(1), { note: 'رقم الوصل 4471209' }),
+		hist('CALLBACK_RECEIVED', 18, null, { note: 'تم استلام الطلب من المندوب' }),
+		hist('CALLBACK_RECEIVED', 6, null, { note: 'قيد التوصيل' })
+	],
+	'o-5': [
+		hist('CREATED', 60, me),
+		hist('APPROVED', 55, me),
+		hist('PACKED', 50, op(2)),
+		hist('SENT', 48, op(2), { note: 'سُلّم إلى المندوب حيدر' })
+	],
+	'o-6': [
+		hist('CREATED', 120, null, { note: 'ورد عبر تيليغرام' }),
+		hist('APPROVED', 110, op(1)),
+		hist('PACKED', 100, op(1), { note: 'ملصق مسبق 4470882' }),
+		hist('SENT', 96, op(1)),
+		hist('CALLBACK_RECEIVED', 72, null, { note: 'تم التسليم' })
+	],
+	'o-7': [
+		hist('CREATED', 16, null),
+		hist('REJECTED', 14, op(2), { note: 'الزبون ألغى الطلب قبل التجهيز' })
+	],
+	'o-8': [hist('CREATED', 1, null, { note: 'ورد من المتجر الإلكتروني' })]
+};
+
+for (const o of demoOrders) {
+	const h = demoHistory[o.id];
+	if (h) o.history = h;
+}
 
 export const demoReminders: Reminder[] = [
 	{
