@@ -2,6 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
+	import { DEMO } from '$lib/config';
 	import { orderSlug } from '$lib/utils/orderSlug';
 	import { useRefresh } from '$lib/utils/refresh.svelte';
 	import { Toaster } from '$lib/components/ui/sonner';
@@ -1250,6 +1251,25 @@
 
 	function printReceipt() {
 		if (!order?.id) return;
+		// Demo mode has no carrier session to fetch a receipt over, so it opens
+		// the drawn one instead, built from this order. A real receipt is not
+		// shipped with the demo: it carries the recipient's name and address in
+		// the clear, and its QR resolves to the rest of their details.
+		if (DEMO) {
+			const q = new URLSearchParams({
+				merchant: auth.user?.name ?? '',
+				city: order.cityName ?? '',
+				region: order.regionName ?? '',
+				address: order.fullAddress ?? '',
+				customer: order.customerName ?? '',
+				items: String(order.itemsNumber ?? ''),
+				price: String(order.price ?? ''),
+				notes: order.notes ?? '',
+				tracking: order.shipment?.trackingNumber ?? order.idempotencyKey ?? ''
+			});
+			window.open(`${base}/demo/receipt.html?${q}`, '_blank');
+			return;
+		}
 		// Ask the backend for the receipt rather than opening the stored qrLink:
 		// that URL carries the merchant token from the day the order was created,
 		// and Alwaseet has rotated it — every one of them now returns the merchant
